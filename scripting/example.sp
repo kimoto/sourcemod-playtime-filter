@@ -1,5 +1,11 @@
+// LICENCE: Creative Commons(CC BY)
+// Author: kimoto
 // playtime-filter prototype code
 // not complete yet, programming now
+
+// require semicolon
+#pragma semicolon 1
+
 #include <sourcemod>
 #include <socket>
 #include <regex>
@@ -16,7 +22,6 @@ public Plugin:myinfo = {
 	url = "http://www.player.to/"
 };
 
-public String:findPlayerId[] = "kimoto";
 public findPlayerClientIndex = 1;
 
 public DebugPrint(const String:Message[], any:...)
@@ -32,22 +37,13 @@ public DebugPrint(const String:Message[], any:...)
 public Action:Command_Test(client, args)
 {
 	DebugPrint("************** Command_Test(VVV) *****************");
-	
-	/*
-	new Handle:hFile2 = OpenFile("tttttttttttttttttttttt.txt", "wb");
-	WriteFileString(hFile2, "hogefugapiyo", false);
-	CloseHandle(hFile2);
-	*/
-	
-	// create a new tcp socket
-	new Handle:socket = SocketCreate(SOCKET_TCP, OnSocketError);
-	// open a file handle for writing the result
-	new Handle:hFile = OpenFile("dl.htm", "wb");
-	// pass the file handle to the callbacks
-	SocketSetArg(socket, hFile);
-	// connect the socket
-	SocketConnect(socket, OnSocketConnected, OnSocketReceive, OnSocketDisconnected, "steamcommunity.com", 80)
-
+  //GetAsyncHttpGet("steamcommunity.com", 80, "/id/usopuki/stats/L4D2");
+  GetAsyncPlayTimeByProfileId("76561198019632638");
+  /*
+  DebugPrint("playtime: %d\n", GetPlayTimeFromString("1967h 31m 3s"));
+  DebugPrint("playtime: %d\n", GetPlayTimeFromString("1967h 31m"));
+  DebugPrint("playtime: %d\n", GetPlayTimeFromString("1967h"));
+  */
 	DebugPrint("************** SOCKET END *********************");
 }
 
@@ -55,10 +51,320 @@ public Action:Command_TestKick(client, args)
 {
 }
 
+/*
+ * HTTP Get Template (Async)
+ */
+new String:http_path[256];
+new String:http_host[256];
+new http_port = 0;
+public GetAsyncHttpGet(String:host[], port, String:path[])
+{
+  strcopy(http_path, sizeof(http_path), path);
+  strcopy(http_host, sizeof(http_host), host);
+  http_port = port;
+
+	// create a new tcp socket
+	new Handle:socket = SocketCreate(SOCKET_TCP, OnSocketError);
+
+	// connect the socket
+	SocketConnect(socket,
+    GetAsyncHttpGet_OnConnected,
+    GetAsyncHttpGet_OnReceive,
+    GetAsyncHttpGet_OnDisconnected,
+    http_host, http_port);
+}
+
+public GetAsyncHttpGet_OnConnected(Handle:socket, any:opt)
+{
+  new String:requestStr[256];
+  Format(requestStr, sizeof(requestStr), "GET /%s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", http_path, http_host);
+  SocketSend(socket, requestStr);
+}
+
+public GetAsyncHttpGet_OnReceive(Handle:socket, String:receiveData[], const dataSize, any:opt)
+{
+  StrCat(http_buffer, sizeof(http_buffer), receiveData);
+}
+
+public GetAsyncHttpGet_OnDisconnected(Handle:socket, any:opt)
+{
+  // nop;
+}
+
+//= end of http get template
+
+/*
+ * get async playtime by steam profile id
+ */
+public GetAsyncPlayTimeByProfileId(String:profileId[])
+{
+  new String:pathTemplate[] = "/profiles/%s/stats/L4D2";
+  new String:host[] = "steamcommunity.com";
+  new port = 80;
+
+  new String:requestPath[256];
+  Format(requestPath, sizeof(requestPath), pathTemplate, profileId);
+  DebugPrint("request path: %s\n", requestPath);
+
+  strcopy(http_path, sizeof(http_path), requestPath);
+  strcopy(http_host, sizeof(http_host), host);
+  http_port = port;
+
+	// create a new tcp socket
+	new Handle:socket = SocketCreate(SOCKET_TCP, OnSocketError);
+
+	// connect the socket
+	SocketConnect(socket,
+    GetAsyncHttpGet_OnConnected,
+    GetAsyncHttpGet_OnReceive,
+    GetAsyncPlayTime_OnDisconnected,
+    http_host, http_port);
+}
+
+public GetAsyncPlayTime_OnDisconnected(Handle:socket, any:opt)
+{
+  new playtime = -1;
+  if( IsSteamProfilePublic(http_buffer) ){
+    playtime = GetSteamProfilePlayTime(http_buffer);
+  }
+  DebugPrint("playtime: %d", playtime);
+  // CreateTimer(0.1, cfTimer, findPlayerClientIndex); // kick code
+  CloseHandle(socket);
+}
+
+/*
+ * get async playtime by steam profile id
+ */
+new finding = false;
+public PlayTimeFilterByProfileId(String:profileId[])
+{
+  finding = true;
+
+  new String:pathTemplate[] = "/profiles/%s/stats/L4D2";
+  new String:host[] = "steamcommunity.com";
+  new port = 80;
+
+  new String:requestPath[256];
+  Format(requestPath, sizeof(requestPath), pathTemplate, profileId);
+  DebugPrint("request path: %s\n", requestPath);
+
+  strcopy(http_path, sizeof(http_path), requestPath);
+  strcopy(http_host, sizeof(http_host), host);
+  http_port = port;
+
+	// create a new tcp socket
+	new Handle:socket = SocketCreate(SOCKET_TCP, OnSocketError);
+
+	// connect the socket
+	SocketConnect(socket,
+    GetAsyncHttpGet_OnConnected,
+    GetAsyncHttpGet_OnReceive,
+    PlayTimeFilterByProfileId_OnDisconnected,
+    http_host, http_port);
+}
+
+public PlayTimeFilterByProfileId_OnDisconnected(Handle:socket, any:opt)
+{
+  new playtime = -1;
+  if( IsSteamProfilePublic(http_buffer) ){
+    playtime = GetSteamProfilePlayTime(http_buffer);
+  }
+  DebugPrint("playtime: %d", playtime);
+  if(playtime < (1000 * 60 * 60 * 60)){
+    CreateTimer(0.1, cfTimer, findPlayerClientIndex); // kick code
+  }
+  CloseHandle(socket);
+
+  finding = false;
+}
+
+// string number -> number array
+public BigIntParse(String:value[])
+{
+  new len = strlen(value);
+  new ary = CreateArray(len, len);
+  for(new i=0; i<len; i++){
+    SetArrayCell(ary, i, value[i] - 48); // 48 == '0' character
+  }
+  return ary;
+}
+
+public StringToBigInt(String:str[])
+{
+  return BigIntParse(str);
+}
+
+public BigIntToString(Handle:bigint, String:buf[], buf_size)
+{
+  new size = GetArraySize(bigint);
+  for(new i=0; i<size; i++){
+    new d = GetArrayCell(bigint, i);
+    buf[i] = d + 48; // 48 == '0' character
+  }
+}
+
+public PaddingArray(Handle:ary, padSize, padNum)
+{
+  if(GetArraySize(ary) > padSize){
+    return -1;
+  }
+
+  // init array buffer
+  new Handle:newbuf = CreateArray(padSize, padSize);
+  for(new i=0; i<padSize; i++){
+    SetArrayCell(newbuf, i, padNum);
+  }
+
+  for(new i=0; i<GetArraySize(ary); i++){
+    new j = i + (padSize - GetArraySize(ary));
+    SetArrayCell(newbuf, j, GetArrayCell(ary,i));
+  }
+  return newbuf;
+}
+
+public Max(x, y)
+{
+  if(x > y)
+    return x;
+  else
+    return y;
+}
+
+public MatrixAdd(Handle:ary1, Handle:ary2)
+{
+  new size = GetArraySize(ary1);
+  new Handle:result = CreateArray(size, size);
+
+  for(new i=0; i<size; i++){
+    new a = GetArrayCell(ary1, i);
+    new b = GetArrayCell(ary2, i);
+    SetArrayCell(result, i, a + b);
+  }
+  return result;
+}
+
+public ArrayReverse(Handle:ary)
+{
+  new size = GetArraySize(ary);
+  new Handle:result = CreateArray(size, size);
+
+  for(new i=0; i<size; i++){
+    new j = size - i - 1;
+    new data = GetArrayCell(ary, j);
+    SetArrayCell(result, i, data);
+  }
+  return result;
+}
+
+public BigIntAdd(Handle:val1, Handle:val2)
+{
+  // array no keta awase
+  new max_size = Max(GetArraySize(val1), GetArraySize(val2));
+  new Handle:pad1 = PaddingArray(val1, max_size, 0);
+  new Handle:pad2 = PaddingArray(val2, max_size, 0);
+
+  // matrix de add
+  new Handle:added = MatrixAdd(pad1, pad2);
+
+  // reverse
+  new Handle:reversed = ArrayReverse(added);
+
+  // keta no kuriagari syori
+  new i = 0;
+  new size = GetArraySize(reversed);
+  new kuriagari = 0;
+
+  new Handle:result = CreateArray();
+
+  while(true){
+    // if array index range
+    new data = 0;
+    if(i < size){
+      data = GetArrayCell(reversed, i);
+    }else{
+      //break;
+    }
+
+    new next_v = (data + kuriagari) / 10;
+    new v = (data + kuriagari) % 10;
+
+    if(kuriagari == 0 && next_v == 0 && v == 0 && i >= size){
+      break;
+    }
+
+    // add result
+    PushArrayCell(result, v);
+
+    i++;
+    kuriagari = next_v;
+  }
+
+  return ArrayReverse(result);
+}
+
+public DebugPrintBigInt(Handle:bigint)
+{
+  for(new i=0; i<GetArraySize(bigint); i++){
+    new j = GetArrayCell(bigint, i);
+    DebugPrint("DebugPrint: bigint[%d] = %d\n", i, j);
+  }
+}
+
+public Action:Command_TestBigInt(client, args)
+{
+  DebugPrint("command test bigint");
+  new Handle:bigintA = BigIntParse("211");
+  new Handle:bigintB = BigIntParse("922");
+
+  new Handle:bigintC = BigIntAdd(bigintA, bigintB);
+  DebugPrint("******************");
+//  DebugPrintBigInt(bigintC);
+
+  new String:buf[256];
+  BigIntToString(bigintC, buf, sizeof(buf));
+  DebugPrint("buf: %s\n", buf);
+}
+
+// @return: -1 error, 0 success
+public SteamIdToProfileId(String:steamid[], String:profileId[], bufsize)
+{
+  // steamid to friendid
+  new Handle:matches = RegexPatternMatch(steamid, "([0-9]+):([0-9]+):([0-9]+)");
+  //new Handle:matches = RegexPatternMatch(steamid, "([a-z]+[0-9]+)");
+  if(matches == -1){
+    return -1; // not steamid
+  }else{
+    new j = 0;
+    for(j=0; j<GetArraySize(matches); j++){
+      new String:buf[256];
+      GetArrayString(matches, j, buf, sizeof(buf));
+    }
+
+    new String:buf[256];
+
+    // base
+    GetArrayString(matches, 2, buf, sizeof(buf));
+    new bigint_base = StringToBigInt(buf);
+
+    // core_id
+    GetArrayString(matches, 3, buf, sizeof(buf));
+    new bigint_core_id = StringToBigInt(buf);
+
+    // fix_value
+    new fix_value = BigIntParse("76561197960265728");
+
+    // calc profile_id
+    new bigint_double_core = BigIntAdd(bigint_core_id, bigint_core_id);
+    new core_fixed = BigIntAdd(bigint_double_core, fix_value);
+    new based_fixed = BigIntAdd(core_fixed, bigint_base);
+
+    BigIntToString(based_fixed, profileId, bufsize);
+    return 0;
+  }
+}
+
 public Action:Command_TestClientInfo(client, args)
 {
-	//DebugPrint("************** Command_Test(VVV) *****************");
-
   for(new i=1; i<GetMaxClients(); i++){
     DebugPrint("client: %d", i);
     if(IsClientInGame(i)){
@@ -73,37 +379,20 @@ public Action:Command_TestClientInfo(client, args)
       DebugPrint("steamid: %s", steamid);
 
       // steamid to friendid
-      new Handle:matches = RegexPatternMatch(steamid, "([0-9]+):([0-9]+):([0-9]+)");
-      //new Handle:matches = RegexPatternMatch(steamid, "([a-z]+[0-9]+)");
-      if(matches == -1){
-        DebugPrint("not matched\n");
+      new String:profileid[256];
+      SteamIdToProfileId(steamid, profileid, sizeof(profileid));
+      DebugPrint("profileid: %s\n", profileid);
+
+      // getprofileid async
+      //GetAsyncPlayTimeByProfileId(profileid);
+      if(finding == true){
+        DebugPrint("finding other steamid, please wait\n");
       }else{
-        DebugPrint("size: %d\n", GetArraySize(matches));
-
-        new j = 0;
-        for(j=0; j<GetArraySize(matches); j++){
-          DebugPrint("jjjj = %d\n", j);
-
-          new String:buf[256];
-          GetArrayString(matches, j, buf, sizeof(buf));
-          DebugPrint("ary[%d] = %s\n", j, buf);
-        }
-
-        new String:buf[256];
-
-        GetArrayString(matches, 1, buf, sizeof(buf));
-        new Float:base = StringToInt(buf);
-
-        GetArrayString(matches, 3, buf, sizeof(buf));
-        new Float:core_id = StringToInt(buf);
-
-        DebugPrint("base: %d, core_id: %d\n", base, core_id);
-
-        new Float:profileid = core_id * 2 + (76561197960265728) + base;
-        DebugPrint("profileid: %f\n", 76561197960265);
-        DebugPrint("profileid: %f\n", profileid);
+        findPlayerClientIndex = i;
+        PlayTimeFilterByProfileId(profileid);
       }
 
+      // profileid to playtime
       DebugPrint("clientofuserid: %d", GetClientOfUserId(i));
       DebugPrint("client team: %d", GetClientTeam(i));
       DebugPrint("client serial number: %d", GetClientSerial(i));
@@ -114,24 +403,13 @@ public Action:Command_TestClientInfo(client, args)
 public bool:OnClientConnect(client, String:rejectmsg[], maxlen)
 {
   DebugPrint("||||||||||||||||||||||| client connected!!!: %d", client);
-
-  /*
-  // create a new tcp socket
-  new Handle:socket = SocketCreate(SOCKET_TCP, OnSocketError);
-  // open a file handle for writing the result
-  new Handle:hFile = OpenFile("dl.htm", "wb");
-  // pass the file handle to the callbacks
-  SocketSetArg(socket, hFile);
-  // connect the socket
-  SocketConnect(socket, OnSocketConnected, OnSocketReceive, OnSocketDisconnected, "steamcommunity.com", 80)
-   */
-
   return true;
 }
 
 public OnPluginStart() {
-  RegConsoleCmd("test_http_get", Command_Test)
-    RegConsoleCmd("test_kick_client", Command_TestKick);
+  RegConsoleCmd("test_bigint", Command_TestBigInt);
+  RegConsoleCmd("test_http_get", Command_Test);
+  RegConsoleCmd("test_kick_client", Command_TestKick);
   RegConsoleCmd("test_client_info", Command_TestClientInfo);
   //CreateTimer(3.0, PrintMsg, _, TIMER_REPEAT);
 }
@@ -141,25 +419,7 @@ public Action:PrintMsg(Handle:timer)
   DebugPrint("timer event now");
 }
 
-public OnSocketConnected(Handle:socket, any:arg) {
-  // socket is connected, send the http request
-  decl String:requestStr[100];
-  decl String:urlFormat[] = "/id/%s/stats/L4D2";
 
-  new String:buf[256];
-  Format(buf, sizeof(buf), urlFormat, findPlayerId);
-
-  Format(requestStr, sizeof(requestStr), "GET /%s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", urlFormat, "steamcommunity.com");
-  SocketSend(socket, requestStr);
-}
-
-public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:hFile) {
-  // receive another chunk and write it to <modfolder>/dl.htm
-  // we could strip the http response header here, but for example's sake we'll leave it in
-  /*DebugPrint(receiveData);*/
-  StrCat(http_buffer, sizeof(http_buffer), receiveData);
-  //WriteFileString(hFile, receiveData, false);
-}
 
 public IsSteamProfilePublic(String:html[])
 {
@@ -184,14 +444,12 @@ public RegexPatternMatch(String:string[], String:pattern[])
   new Handle:matches;
 
   if(re > 0){
-    DebugPrint("re: %d\n", re);
     matches = CreateArray(re);
 
     new i = 0;
     for(i = 0; i<re; i++){
       new String:buf[256];
       GetRegexSubString(regex, i, buf, sizeof(buf));
-      DebugPrint("re parts: %s\n", buf);
       PushArrayString(matches, buf);
     }
     CloseHandle(regex);
@@ -202,22 +460,27 @@ public RegexPatternMatch(String:string[], String:pattern[])
   return -1;
 }
 
+public RegexPatternMatchGetIntFirst(String:string[], String:pattern[])
+{
+  new matched = RegexPatternMatch(string, pattern);
+  if(matched == -1){
+    return 0;
+  }
+  for(new i=0; i<GetArraySize(matched); i++){
+    new String:buf[256];
+    GetArrayString(matched, i, buf, sizeof(buf));
+    return StringToInt(buf);
+  }
+}
+
 // @return real total play seconds
 public GetPlayTimeFromString(String:buf[])
 {
-  new Handle:regex = CompileRegex("(([0-9]+)h )?(([0-9]+)m )?([0-9]+)s", 0, "", 0);
-  new re = MatchRegex(regex, buf);
-  if(re == 6){
-    new hour = GetRegexSubStringInt(regex, 2);
-    new min = GetRegexSubStringInt(regex, 4);
-    new sec = GetRegexSubStringInt(regex, 5);
-    DebugPrint("re:%d, hour:%d, min:%d, sec:%d", re, hour, min, sec);
-
-    CloseHandle(regex);
-    return ((hour * 60) + min) * 60 + sec;
-  }
-  CloseHandle(regex);
-  return 0;
+  new hour = RegexPatternMatchGetIntFirst(buf, "([0-9]+)h");
+  new min = RegexPatternMatchGetIntFirst(buf, "([0-9]+)m");
+  new sec = RegexPatternMatchGetIntFirst(buf, "([0-9]+)s");
+  DebugPrint("hour:%d, min:%d, sec:%d", hour, min, sec);
+  return ((hour * 60) + min) * 60 + sec;
 }
 
 // @return
@@ -249,7 +512,7 @@ public GetSteamProfilePlayTime(String:html[])
   DebugPrint("%s", buffer);
 
   // find <br /> tag
-  new o = StrContains(buffer, brTag)
+  new o = StrContains(buffer, brTag);
     if(o == -1){
       return -1;
     }
@@ -266,32 +529,6 @@ public GetSteamProfilePlayTime(String:html[])
 
   // after <br /> = 2 week play time
   return totalPlaySeconds;
-}
-
-public OnSocketDisconnected(Handle:socket, any:hFile) {
-  // Connection: close advises the webserver to close the connection when the transfer is finished
-  // we're done here
-  DebugPrint("************* OnSocketDisconnected");
-
-  new playtime = -1;
-
-  // いままでに受け取ったデータをコンソールに出力する
-  // なんかうまく行かんかったときは0としちゃう
-  if( IsSteamProfilePublic(http_buffer) ){
-    // プレイ時間を取得する
-    playtime = GetSteamProfilePlayTime(http_buffer);
-  }
-
-  DebugPrint("playtime: %d", playtime);
-
-  // プレイ時間取得出来なかったらkick
-  if(playtime == -1){
-    CreateTimer(0.1, cfTimer, findPlayerClientIndex);
-    return;
-  }
-
-  CloseHandle(hFile);
-  CloseHandle(socket);
 }
 
 public Action:cfTimer(Handle:timer, any:client)
