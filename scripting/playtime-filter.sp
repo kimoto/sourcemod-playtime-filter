@@ -1,7 +1,7 @@
 // LICENCE: creative-commons: CC-BY
 // AUTHOR: kimoto
 #include <sourcemod>
-#include "playtime-filter.inc"
+#include <playtime-filter_async>
 
 #define PLUGIN_FILENAME "playtime-filter"
 #define PLUGIN_VERSION "1.0.0"
@@ -94,6 +94,23 @@ public Action:Command_PlayTimeFilterRun(client, args)
   }
 }
 
+public Action:Command_PlayTimeFilterAsyncRun(client, args)
+{
+  DebugPrint("Command_PlayTimeFilterAsyncRun\n");
+
+  for(new i=1; i<GetMaxClients(); i++){
+    if( IsClientInGame(i) && !IsClientBot(i) ){ // human player & in game
+      SteamAPI_RequestStats(i);
+    }
+  }
+}
+
+public SteamAPI_ReceiveStats(client, playtime)
+{
+  DebugPrint("steamapi_stats_recevied: client:%d, playtime:%d\n", client, playtime);
+  FilterBasedOnTotalPlayTime(client, playtime);
+}
+
 public TestParsePlayTimeFormat(String:format[], n)
 {
   new r = ParsePlayTimeFormat(format);
@@ -117,20 +134,13 @@ public Action:Command_FormatTest(client, args)
   TestParsePlayTimeFormat("", 0);
   TestParsePlayTimeFormat("0", 0);
   TestParsePlayTimeFormat("1", 1);
-
-  /*
-     new String:buf[256];
-     PlayTimeToString(g_iMinPlayTime, buf, sizeof(buf));
-     PlayTimeToString(g_iMaxPlayTime, buf, sizeof(buf));
-   */
 }
 
 public OnClientPutInServer(client)
 {
   if(g_bEnable){
-    DebugPrint("=================== connect: %d\n", client);
-    new playtime = GetTotalPlayTimeByClient(client, GAMEID, "stat.xml");
-    FilterBasedOnTotalPlayTime(client, playtime);
+    DebugPrint("client connect: %d\n", client);
+    SteamAPI_RequestStats(client);
   }
 }
 
@@ -191,6 +201,7 @@ public OnPluginStart()
   AutoExecConfig(true, PLUGIN_FILENAME);
   ReloadConvars();
 
+  RegConsoleCmd("playtime_filter_async_run", Command_PlayTimeFilterAsyncRun);
   RegConsoleCmd("playtime_filter_run", Command_PlayTimeFilterRun);
   RegConsoleCmd("playtime_filter_format_test", Command_FormatTest);
 }
