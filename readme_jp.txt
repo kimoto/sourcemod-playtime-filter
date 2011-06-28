@@ -64,14 +64,14 @@ Author: kimoto
   3. プレイヤー接続時に以下の処理を実行します
     4. client indexからSteamIdを取得します
     5. SteamIdからProfileIdを取得します(CSteam extensionを使います)
-    6. client indexを元に、初期化で作成した配列(自分専用の領域)に空のDataPackを作成します
-      すでにDataPackがそこにあった場合はエラーとして終了します
-      そのときそのクライアントはkickされます(未実装)
-    7. ProfileIdを利用して、SteamStats APIに非同期でHTTP1.0/GETします(Socket extensionを使います)
-    8. 非同期にXMLデータをメモリ内に書き込み(蓄積)します
-      初期化処理で作成したMaxClient分の配列の、現在対象となってるclientに対応する配列要素が対象です。
+    6. client indexを元に、初期化で作成した配列の中の自分専用の領域に空のDataPackを作成します
+      すでにDataPackがそこにあった場合は、他のスレッドにて現在取得処理中であるハズなので
+      エラーとして終了します。"そのときそのクライアントはkickされます"(ここはまだ未実装)
+    7. ProfileIdを元に、SteamStats APIに非同期でHTTP1.0/GET開始します(Socket extensionを使います)
+    8. 非同期に受信したXMLデータをメモリ内に書き込み(蓄積)します
+      初期化処理で作成したMaxClient分の配列の、現在対象となってるclientに対応する配列要素にDataPackオブジェクトがあるので、そこに受信したデータを追記していきます
 
-      イメージ図(この場合は1が現在対象となってるclient index)
+      イメージ図(client indexの1が現在対象となってる場合の例、他に現在受信してるスレッドがない場合)
       ---------------
       buffers[0] = INVALID_HANDLE;
       buffers[1] = DataPack;
@@ -80,6 +80,7 @@ Author: kimoto
       buffers[17] = INVALID_HANDLE;
       ---------------
       当然非同期にこの処理は実行されるので、次のようになることも普通に起こりうる
+      (すべてのclientに対するデータが受信中状態の例)
       ---------------
       buffers[0] = DataPack;
       buffers[1] = DataPack;
@@ -87,11 +88,11 @@ Author: kimoto
       ...
       buffers[17] = DataPack;
       ---------------
-
-      すべてのデータを受信し終わるまでXMLデータを書き込み続けます。
     9. 取得したXMLデータを解析しプレイ時間を取得します
-    10. 取得したプレイ時間を元にcvarと照合し、入場を許可出来ない場合はkickします
+    10. 解析したプレイ時間を元にcvarの設定と照合し、入場を許可出来ない場合はkickします
+      cvarの設定というのは、playtime_filter_min_playtime, playtime_filter_max_playtime のことです
+      "playtime_filter_enableが0になっている場合はkickされません"(ここはまだ未実装)
     11. 取得したXMLデータをメモリ上から解放し、INVALID_HANDLEを代入します
       DataPack配列の、現在対象となってるclient indexの要素をメモリから解放し
-      そこにINVALID_HANDLEを代入します
+      そこにINVALID_HANDLEを代入しCloseHandleします
 
