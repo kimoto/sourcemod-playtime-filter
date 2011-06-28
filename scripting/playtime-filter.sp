@@ -64,11 +64,13 @@ public KickClientByPlayTime(client, playtime)
 
 public FilterBasedOnTotalPlayTime(client, playtime)
 {
-  if( IsClientInGame(client) && !IsClientBot(client) ){
-    if(IsValidPlayTime(playtime)){
-      DebugPrint("trust user (playtime): %d", playtime);
-    }else{
-      KickClientByPlayTime(client, playtime);
+  if(g_bEnable){
+    if( IsClientInGame(client) && !IsClientBot(client) ){
+      if(IsValidPlayTime(playtime)){
+        DebugPrint("trust user (playtime): %d", playtime);
+      }else{
+        KickClientByPlayTime(client, playtime);
+      }
     }
   }
 }
@@ -194,4 +196,3 @@ public OnPluginStart()
   RegConsoleCmd("playtime_filter_run", Command_PlayTimeFilterRun);
   RegConsoleCmd("playtime_filter_format_test", Command_FormatTest);
 }
-
