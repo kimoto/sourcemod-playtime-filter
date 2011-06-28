@@ -59,19 +59,23 @@ Author: kimoto
   初期化処理
   1. 起動時にMaxClient(defualt: 18)ぶんの要素を持つ配列を確保します
   2. すべてにINVALID_HANDLEを設定します
+    これは非同期に受信するXML用のバッファです
+    clientの数だけ同時に受信できるようにするために作成します。
+    DataPackというSourceMODの構造体(オブジェクト)の配列を作成します(初期値がINVALID_HANDLE)
+    以後、この配列をこの文書では"DataPack配列"と呼ぶことにします
 
   プレイヤー接続時
   3. プレイヤー接続時に以下の処理を実行します
     4. client indexからSteamIdを取得します
     5. SteamIdからProfileIdを取得します(CSteam extensionを使います)
-    6. client indexを元に、初期化で作成した配列の中の自分専用の領域に空のDataPackを作成します
-      すでにDataPackがそこにあった場合は、他のスレッドにて現在取得処理中であるハズなので
-      エラーとして終了します。"そのときそのクライアントはkickされます"(ここはまだ未実装)
+    6. DataPack配列の、現在処理対象となってるclientのインデックスに空のDataPackを作成し代入します
+      このとき、すでにDataPackオブジェクトがそこにあった場合は
+      すなわち他のスレッドにて現在XMLの取得処理が実行中であるハズなので
+      エラーとして終了します。"このときクライアントのkickされます"(ここはまだ未実装)
     7. ProfileIdを元に、SteamStats APIに非同期でHTTP1.0/GET開始します(Socket extensionを使います)
-    8. 非同期に受信したXMLデータをメモリ内に書き込み(蓄積)します
-      初期化処理で作成したMaxClient分の配列の、現在対象となってるclientに対応する配列要素にDataPackオブジェクトがあるので、そこに受信したデータを追記していきます
-
-      イメージ図(client indexの1が現在対象となってる場合の例、他に現在受信してるスレッドがない場合)
+    8. XMLデータが非同期に受信され、DataPackに徐々に蓄積されていきます
+      イメージ図(client indexの1が現在受信中の場合、かつ他に現在受信してるDataPackがない場合)
+      (MaxClientはデフォルトだと18です、したがって0 - 17の配列になる)
       ---------------
       buffers[0] = INVALID_HANDLE;
       buffers[1] = DataPack;
@@ -88,11 +92,14 @@ Author: kimoto
       ...
       buffers[17] = DataPack;
       ---------------
-    9. 取得したXMLデータを解析しプレイ時間を取得します
-    10. 解析したプレイ時間を元にcvarの設定と照合し、入場を許可出来ない場合はkickします
-      cvarの設定というのは、playtime_filter_min_playtime, playtime_filter_max_playtime のことです
-      "playtime_filter_enableが0になっている場合はkickされません"(ここはまだ未実装)
-    11. 取得したXMLデータをメモリ上から解放し、INVALID_HANDLEを代入します
-      DataPack配列の、現在対象となってるclient indexの要素をメモリから解放し
-      そこにINVALID_HANDLEを代入しCloseHandleします
+    9. すべてのデータを受信します
+    10. 取得したXMLデータを解析しプレイ時間を取得します
+      正規表現でサクっと取得します
+    11. 解析によって取得したプレイ時間のプレイヤーが、サーバーへの参加を許可出来ない場合はkickします
+      cvarの設定というのは
+      具体的にはplaytime_filter_min_playtime, playtime_filter_max_playtime のことです
+      このとき"playtime_filter_enableが0になっている場合はkick処理は実行されません"(ここはまだ未実装)
+    12. 処理が終了したので取得したXMLデータをメモリ上から解放します
+      DataPack配列の現在対象となってる要素をメモリから解放し(CloseHandle)
+      そこにINVALID_HANDLEを代入します
 
