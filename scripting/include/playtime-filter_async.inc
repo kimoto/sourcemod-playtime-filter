@@ -10,14 +10,79 @@
 #include <sourcemod>
 #include <socket>
 #include <regex>
-#include <playtime-filter>
+#include <csteamid>
 
-#define DEBUG_STRING_BUFFER_SIZE 1024
+#define STEAMCOMMUNITY_HOST "steamcommunity.com"
+//#define STEAMCOMMUNITY_HOST "localhost"
+#define STEAMCOMMUNITY_PORT 80
+#define STEAMCOMMUNITY_STATS_API_FORMAT "/profiles/%s/statsfeed/550/?xml=1&schema=1"
 
-public String:http_buffer[51200] = "";
-public findPlayerClientIndex = 1;
+stock Handle:buffers = INVALID_HANDLE;
+
+#define DEBUG_STRING_BUFFER_SIZE 256
+public DebugPrint(const String:Message[], any:...)
+{
+  decl String:DebugBuff[DEBUG_STRING_BUFFER_SIZE];
+  VFormat(DebugBuff, sizeof(DebugBuff), Message, 2);
+  LogMessage(DebugBuff);
+}
+
+public Handle:RegexPatternMatch(String:string[], String:pattern[])
+{
+  new Handle:regex = CompileRegex(pattern, 0, "", 0);
+  new re = MatchRegex(regex, string);
+  new Handle:matches;
+
+  if(re > 0){
+    //DebugPrint("regexpatternmatch: match\n");
+    matches = CreateArray(re);
+
+    for(new i=0; i<re; i++){
+      new String:buf[1024];
+      GetRegexSubString(regex, i, buf, sizeof(buf));
+      //DebugPrint("buf: %s\n", buf);
+      PushArrayString(matches, buf);
+    }
+    CloseHandle(regex);
+    return matches;
+  }
+
+  CloseHandle(regex);
+  return INVALID_HANDLE;
+}
+
+public bool:RegexPatternMatchGetFirst(String:string[], String:pattern[], String:buf[], buf_size)
+{
+  new Handle:matched = RegexPatternMatch(string, pattern);
+  if(matched == INVALID_HANDLE){
+    //DebugPrint("not matched\n");
+    return false;
+  }
+  //DebugPrint("matched\n");
+  new i = (GetArraySize(matched) >= 1 ? 1 : 0);
+  GetArrayString(matched, i, buf, buf_size);
+  return true;
+}
+
+public RegexPatternMatchGetFirstInt(String:string[], String:pattern[])
+{
+  new String:buf[256];
+  if( !RegexPatternMatchGetFirst(string, pattern, buf, sizeof(buf)) ){
+    return -1;
+  }
+  return StringToInt(buf);
+}
 
 public SteamAPI_RequestStats(client)
+{
+  new String:profileId[256];
+  ClientIndexToProfileId(client, profileId, sizeof(profileId));
+
+  // fetch from api
+  GetAsyncPlayTimeByProfileId(client, profileId);
+}
+
+public ClientIndexToProfileId(client, String:profileId[], size_of_profileId)
 {
   // client index -> steamid
   new String:steamId[256];
@@ -25,52 +90,37 @@ public SteamAPI_RequestStats(client)
   DebugPrint("client index: %d -> steamid: %s\n", client, steamId);
 
   // steam id -> profile id
-  new String:profileId[256];
-  SteamIDToCSteamID(steamId, profileId, sizeof(profileId));
+  SteamIDToCSteamID(steamId, profileId, size_of_profileId);
   DebugPrint("steam id -> profile id: %s\n", profileId);
-
-  // fetch from api
-  GetAsyncPlayTimeByProfileId(client, profileId);
-}
-
-/*
- * HTTP Get Template (Async)
- */
-new String:http_path[256];
-new String:http_host[256];
-new http_port = 0;
-public GetAsyncHttpGet(String:host[], port, String:path[])
-{
-  strcopy(http_path, sizeof(http_path), path);
-  strcopy(http_host, sizeof(http_host), host);
-  http_port = port;
-
-  // create a new tcp socket
-  new Handle:socket = SocketCreate(SOCKET_TCP, OnSocketError);
-
-  // connect the socket
-  SocketConnect(socket,
-    GetAsyncHttpGet_OnConnected,
-    GetAsyncHttpGet_OnReceive,
-    GetAsyncHttpGet_OnDisconnected,
-    http_host, http_port);
 }
 
 public GetAsyncHttpGet_OnConnected(Handle:socket, any:opt)
 {
+  new client = opt;
+
+  new String:profileId[256];
+  ClientIndexToProfileId(client, profileId, sizeof(profileId));
+
+  new String:requestPath[256];
+  Format(requestPath, sizeof(requestPath), STEAMCOMMUNITY_STATS_API_FORMAT, profileId);
+  DebugPrint("request path: %s\n", requestPath);
+
   new String:requestStr[256];
-  Format(requestStr, sizeof(requestStr), "GET /%s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", http_path, http_host);
+  Format(requestStr, sizeof(requestStr), "GET /%s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", requestPath, STEAMCOMMUNITY_HOST);
   SocketSend(socket, requestStr);
 }
 
 public GetAsyncHttpGet_OnReceive(Handle:socket, String:receiveData[], const dataSize, any:opt)
 {
-  StrCat(http_buffer, sizeof(http_buffer), receiveData);
-}
+  new client = opt;
 
-public GetAsyncHttpGet_OnDisconnected(Handle:socket, any:opt)
-{
-  // nop;
+  new Handle:pack = GetArrayCell(buffers, client);
+  //DebugPrint("pack(receive): %d, %s\n", pack, receiveData);
+
+  WritePackString(pack, receiveData);
+
+  //WriteFileString(hFile, receiveData, false);
+  //StrCat(http_buffer, sizeof(http_buffer), receiveData);
 }
 
 //= end of http get template
@@ -80,17 +130,19 @@ public GetAsyncHttpGet_OnDisconnected(Handle:socket, any:opt)
  */
 public GetAsyncPlayTimeByProfileId(client, String:profileId[])
 {
-  new String:pathTemplate[] = "/profiles/%s/statsfeed/550/?xml=1&schema=1";
-  new String:host[] = "steamcommunity.com";
-  new port = 80;
-
-  new String:requestPath[256];
-  Format(requestPath, sizeof(requestPath), pathTemplate, profileId);
-  DebugPrint("request path: %s\n", requestPath);
-
-  strcopy(http_path, sizeof(http_path), requestPath);
-  strcopy(http_host, sizeof(http_host), host);
-  http_port = port;
+  // clear accept buffer
+  new Handle:pack = GetArrayCell(buffers, client);
+  if(pack != INVALID_HANDLE){
+    DebugPrint("****** Error: nanka okasii\n");
+    return;
+    /*
+    CloseHandle(pack);
+    pack = INVALID_HANDLE;
+    */
+  }
+  pack = CreateDataPack();
+  ResetPack(pack);
+  SetArrayCell(buffers, client, pack);
 
   // create a new tcp socket
   new Handle:socket = SocketCreate(SOCKET_TCP, OnSocketError);
@@ -98,38 +150,69 @@ public GetAsyncPlayTimeByProfileId(client, String:profileId[])
   // add client index option
   SocketSetArg(socket, client);
 
+  SocketSetOption(socket, SocketReceiveTimeout, 5000);
+  SocketSetOption(socket, SocketSendTimeout, 5000);
+
   // connect the socket
   SocketConnect(socket,
     GetAsyncHttpGet_OnConnected,
     GetAsyncHttpGet_OnReceive,
     GetAsyncPlayTime_OnDisconnected,
-    http_host, http_port);
+    STEAMCOMMUNITY_HOST, STEAMCOMMUNITY_PORT);
+}
+
+public SteamAPI_PrintCachedStat(client)
+{
+  new Handle:pack = GetArrayCell(buffers, client);
+  ResetPack(pack);
+
+  new String:buf[5000];
+  ReadPackString(pack, buf, sizeof(buf));
+  DebugPrint("SteamAPI_PrintCachedStat(%d): %s\n", client, buf);
+}
+
+public SteamAPI_Init(number_of_clients)
+{
+  //DebugPrint("number_of_clients: %d\n", number_of_clients);
+
+  buffers = CreateArray(number_of_clients, number_of_clients);
+  for(new i=0; i<number_of_clients; i++){
+    new Handle:pack = CreateDataPack();
+    //ResetPack(pack);
+    SetArrayCell(buffers, i, INVALID_HANDLE);
+  }
 }
 
 forward SteamAPI_ReceiveStats(client, playtime);
 
-public GetAsyncPlayTime_OnDisconnected(Handle:socket, any:opt)
+public GetTotalPlayTimeFromXML(String:xmldata[])
 {
-  new client = opt; // opt == client index
-
-  new playtime = GetTotalPlayTimeFromXML(http_buffer);
-  DebugPrint("playtime: %d", playtime);
-
-  /*
-  if(playtime < (1000 * 60 * 60 * 60)){
-    CreateTimer(0.1, cfTimer, findPlayerClientIndex); // kick code
-  }
-  */
-  DebugPrint("call SteamAPI_ReceiveStats\n");
-  SteamAPI_ReceiveStats(client, playtime);
-
-  CloseHandle(socket);
+  return RegexPatternMatchGetFirstInt(xmldata, "stat.totalplaytime.total.*<value>([0-9]+)");
 }
 
-public OnSocketError(Handle:socket, const errorType, const errorNum, any:hFile) {
+public GetAsyncPlayTime_OnDisconnected(Handle:socket, any:opt)
+{
+  new client = opt;
+  new Handle:pack = GetArrayCell(buffers, client);
+  DebugPrint("pack(disconnect): %d\n", pack);
+
+  new String:buf[5000];
+  ResetPack(pack);
+  ReadPackString(pack, buf, sizeof(buf));
+  //DebugPrint("read pack: %s\n", buf);
+
+  new playtime = GetTotalPlayTimeFromXML(buf);
+  SteamAPI_ReceiveStats(client, playtime);
+  CloseHandle(socket);
+
+  CloseHandle(pack);
+  pack = INVALID_HANDLE;
+  SetArrayCell(buffers, client, pack);
+}
+
+public OnSocketError(Handle:socket, const errorType, const errorNum, any:opt) {
   // a socket error occured
   LogError("socket error %d (errno %d)", errorType, errorNum);
-  CloseHandle(hFile);
   CloseHandle(socket);
 }
 

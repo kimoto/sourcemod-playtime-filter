@@ -68,7 +68,8 @@ public FilterBasedOnTotalPlayTime(client, playtime)
     if(IsValidPlayTime(playtime)){
       DebugPrint("trust user (playtime): %d", playtime);
     }else{
-      KickClientByPlayTime(client, playtime);
+      DebugPrint("reject user (playtime): %d", playtime);
+      //KickClientByPlayTime(client, playtime);
     }
   }
 }
@@ -84,6 +85,7 @@ public IsClientBot(client)
 
 public Action:Command_PlayTimeFilterRun(client, args)
 {
+/*
   DebugPrint("Command_PlayTimeFilterRun\n");
 
   for(new i=1; i<GetMaxClients(); i++){
@@ -92,6 +94,7 @@ public Action:Command_PlayTimeFilterRun(client, args)
       FilterBasedOnTotalPlayTime(i, playtime);
     }
   }
+*/
 }
 
 public Action:Command_PlayTimeFilterAsyncRun(client, args)
@@ -101,6 +104,17 @@ public Action:Command_PlayTimeFilterAsyncRun(client, args)
   for(new i=1; i<GetMaxClients(); i++){
     if( IsClientInGame(i) && !IsClientBot(i) ){ // human player & in game
       SteamAPI_RequestStats(i);
+    }
+  }
+}
+
+public Action:Command_PrintCache(client, args)
+{
+  DebugPrint("Command_PlayTimePrintCache\n");
+
+  for(new i=1; i<GetMaxClients(); i++){
+    if( IsClientInGame(i) && !IsClientBot(i) ){ // human player & in game
+      SteamAPI_PrintCachedStat(i);
     }
   }
 }
@@ -186,6 +200,14 @@ public ReloadConvars()
   DebugPrint("ReloadConvars: g_iMinPlayTime: %d, g_iMaxPlayTime: %d\n", g_iMinPlayTime, g_iMaxPlayTime);
 }
 
+public test(any:data)
+{
+  for(new i=0; i<GetArraySize(data); i++){
+    new v = GetArrayCell(data, i);
+    DebugPrint("%d = %d\n", i, v);
+  }
+}
+
 public OnPluginStart()
 {
   CreateConVar("playtime_filter_version", PLUGIN_VERSION, "playtime-filter plugin version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
@@ -204,5 +226,8 @@ public OnPluginStart()
   RegConsoleCmd("playtime_filter_async_run", Command_PlayTimeFilterAsyncRun);
   RegConsoleCmd("playtime_filter_run", Command_PlayTimeFilterRun);
   RegConsoleCmd("playtime_filter_format_test", Command_FormatTest);
+  RegConsoleCmd("playtime_filter_print_cache", Command_PrintCache);
+
+  SteamAPI_Init(MaxClients);
 }
 
