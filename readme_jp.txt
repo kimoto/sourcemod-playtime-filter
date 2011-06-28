@@ -57,7 +57,7 @@ Author: kimoto
   少し複雑なのでシステム設計をメモしておきます
 
   初期化処理
-  1. 起動時にMaxClient(defualt: 18)ぶんの要素を持つ配列を確保します
+  1. Plugin読み込み時にMaxClient(defualt: 18)ぶんの要素を持つ配列を確保します
   2. すべてにINVALID_HANDLEを設定します
     これは非同期に受信するXML用のバッファです
     clientの数だけ同時に受信できるようにするために作成します。
@@ -71,7 +71,7 @@ Author: kimoto
     6. DataPack配列の、現在処理対象となってるclientのインデックスに空のDataPackを作成し代入します
       このとき、すでにDataPackオブジェクトがそこにあった場合は
       すなわち他のスレッドにて現在XMLの取得処理が実行中であるハズなので
-      エラーとして終了します。"このときクライアントのkickされます"(ここはまだ未実装)
+      エラーとして終了します。"このときこのクライアントのkickされます"(ここはまだ未実装)
     7. ProfileIdを元に、SteamStats APIに非同期でHTTP1.0/GET開始します(Socket extensionを使います)
     8. XMLデータが非同期に受信され、DataPackに徐々に蓄積されていきます
       イメージ図(client indexの1が現在受信中の場合、かつ他に現在受信してるDataPackがない場合)
@@ -102,4 +102,7 @@ Author: kimoto
     12. 処理が終了したので取得したXMLデータをメモリ上から解放します
       DataPack配列の現在対象となってる要素をメモリから解放し(CloseHandle)
       そこにINVALID_HANDLEを代入します
+
+*TODO
+  Pluginアンロード時にPlugin読み込み時に確保したデータをしっかり解放するようにする
 
